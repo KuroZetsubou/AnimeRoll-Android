@@ -73,8 +73,11 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
     var loading by remember(target) { mutableStateOf(true) }
     var showSources by remember { mutableStateOf(false) }
     var confirmRepair by remember { mutableStateOf(false) }
+    var confirmDeleteSeries by remember { mutableStateOf(false) }
+    var episodeToDelete by remember { mutableStateOf<Episode?>(null) }
     var tab by remember(target) { mutableIntStateOf(0) }
     var showStatus by remember { mutableStateOf(false) }
+    var similar by remember(target) { mutableStateOf<List<Similar>?>(null) }
 
     suspend fun loadEpisodes() { series?.let { s -> episodes = runCatching { api.episodes(s.id) }.getOrElse {
         state.offline.items.filter { it.series.id == s.id }.map { it.episode }.sortedBy { it.number } } } }
@@ -92,6 +95,10 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
         }
         loadEpisodes()
         loading = false
+    }
+    LaunchedEffect(media?.id, series?.aniListId) {
+        val id = media?.id ?: series?.aniListId
+        if (!loading || id != null) similar = similarTitles(state, id)
     }
     // Refresh progress after watching.
     LaunchedEffect(state.playing) { if (state.playing == null && !loading) loadEpisodes() }
@@ -180,19 +187,21 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
                         Row(Modifier.fillMaxWidth().offset(y = (-48).dp).padding(horizontal = AR.side), horizontalArrangement = Arrangement.End) {
                             SecondaryButton("Ripara serie", Icons.Default.Build, small = true, ghost = true) { confirmRepair = true }
                             Spacer(Modifier.width(8.dp))
+                            SecondaryButton("Elimina serie", Icons.Default.Delete, small = true, ghost = true) { confirmDeleteSeries = true }
+                            Spacer(Modifier.width(8.dp))
                             SecondaryButton("Scarica tutti sul dispositivo", Icons.Default.Download, small = true, ghost = true) {
                                 episodes.filter { state.offline.item(it.id) == null }.forEach { startDeviceDownload(state, it, series!!) }
                             }
                         }
                     }
-                    items(episodes, key = { it.id }) { ep -> Box(Modifier.offset(y = (-48).dp)) { EpisodeRow(state, ep, series!!, episodes, tickN, alProgress = entry?.progress ?: 0) } }
+                    items(episodes, key = { it.id }) { ep -> Box(Modifier.offset(y = (-48).dp)) { EpisodeRow(state, ep, series!!, episodes, tickN, alProgress = entry?.progress ?: 0, onDelete = { episodeToDelete = ep }) } }
                 } else {
-                    val similar = similarTitles(state, media?.id ?: series?.aniListId, series?.id, genres)
                     item {
                         Box(Modifier.offset(y = (-40).dp)) {
-                            if (similar.isEmpty()) Text("Nessun titolo simile", color = AR.textTertiary, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(AR.side))
+                            if (similar == null) Box(Modifier.fillMaxWidth().padding(AR.side), Alignment.Center) { CircularProgressIndicator(color = AR.accent) }
+                            else if (similar!!.isEmpty()) Text("Nessun titolo simile", color = AR.textTertiary, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(AR.side))
                             else LazyRow(contentPadding = PaddingValues(horizontal = AR.side), horizontalArrangement = Arrangement.spacedBy(AR.posterGap)) {
-                                items(similar, key = { "${it.aniListId}-${it.seriesId}" }) { s -> Poster(s.title, s.poster) { state.openDetail(s.aniListId, s.seriesId) } }
+                                items(similar!!, key = { "${it.aniListId}-${it.seriesId}" }) { s -> Poster(s.title, s.poster) { state.openDetail(s.aniListId, s.seriesId) } }
                             }
                         }
                     }
@@ -217,6 +226,38 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
             }.onFailure { state.toast(it.message) }
         }
     }
+    episodeToDelete?.let { ep ->
+        AlertDialog(
+            onDismissRequest = { episodeToDelete = null },
+            title = { Text("Eliminare l'episodio dal NAS?") },
+            text = { Text("Il file e i sottotitoli dell'episodio ${ep.label} vengono cancellati dal NAS e liberano spazio. Per rivederlo dovrai scaricarlo di nuovo.") },
+            confirmButton = { TextButton({
+                episodeToDelete = null
+                scope.launch {
+                    runCatching { api.deleteEpisode(ep.id) }
+                        .onSuccess { episodes = episodes.filter { it.id != ep.id }; if (episodes.isEmpty()) series = null; state.refresh(); state.toast("Episodio eliminato") }
+                        .onFailure { state.toast(it.message) }
+                }
+            }) { Text("Elimina", color = AR.danger) } },
+            dismissButton = { TextButton({ episodeToDelete = null }) { Text("Annulla") } },
+            containerColor = AR.surfaceStrong,
+        )
+    }
+    if (confirmDeleteSeries) AlertDialog(
+        onDismissRequest = { confirmDeleteSeries = false },
+        title = { Text("Eliminare tutta la serie dal NAS?") },
+        text = { Text("Tutti gli episodi di “$title” vengono cancellati dal NAS. Questa azione non si può annullare.") },
+        confirmButton = { TextButton({
+            confirmDeleteSeries = false
+            series?.let { s -> scope.launch {
+                runCatching { api.deleteSeries(s.id) }
+                    .onSuccess { episodes = emptyList(); series = null; state.refresh(); state.toast("Serie eliminata") }
+                    .onFailure { state.toast(it.message) }
+            } }
+        }) { Text("Elimina tutto", color = AR.danger) } },
+        dismissButton = { TextButton({ confirmDeleteSeries = false }) { Text("Annulla") } },
+        containerColor = AR.surfaceStrong,
+    )
     if (confirmRepair) AlertDialog(
         onDismissRequest = { confirmRepair = false },
         title = { Text("Riparare sul NAS?") },
@@ -309,7 +350,7 @@ fun startDeviceDownload(state: AppState, ep: Episode, series: Series) = state.sc
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<Episode>, tick: Int, alProgress: Int) {
+private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<Episode>, tick: Int, alProgress: Int, onDelete: () -> Unit) {
     val context = LocalContext.current
     val view = LocalView.current
     var menu by remember { mutableStateOf(false) }
@@ -354,6 +395,7 @@ private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<E
                 if (item != null && st?.done == true) state.offline.openWith(item)
                 else state.scope.launch { runCatching { openUrlWith(context, state.api.stream(ep.id).url) }.onFailure { state.toast(it.message) } }
             })
+            DropdownMenuItem({ Text("Elimina dal NAS…", color = AR.danger) }, leadingIcon = { Icon(Icons.Default.DeleteForever, null, tint = AR.danger) }, onClick = { menu = false; onDelete() })
             if (item != null) DropdownMenuItem({ Text("Elimina dal dispositivo") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = {
                 menu = false; state.offline.delete(item)
             })
@@ -363,15 +405,12 @@ private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<E
 
 private data class Similar(val title: String, val poster: String?, val aniListId: Int?, val seriesId: Int?)
 
-/** Titles sharing a genre: NAS library first, then Home's trending and seasonal lists (no recommendations endpoint). */
-private fun similarTitles(state: AppState, aniListId: Int?, seriesId: Int?, genres: List<String>): List<Similar> {
-    if (genres.isEmpty()) return emptyList()
-    val set = genres.map { it.lowercase() }.toSet()
-    val lib = state.library.filter { it.id != seriesId && (aniListId == null || it.aniListId != aniListId) && it.genreList.any { g -> g.lowercase() in set } }
-        .map { Similar(it.title, it.posterUrl, it.aniListId, it.id) }
-    val libIds = lib.mapNotNull { it.aniListId }.toSet()
-    val al = (state.home?.trending.orEmpty() + state.home?.seasonal.orEmpty()).distinctBy { it.id }
-        .filter { it.id != aniListId && it.id !in libIds && it.genres.any { g -> g.lowercase() in set } }
-        .map { Similar(it.title, it.coverUrl, it.id, null) }
-    return (lib + al).take(30)
+/** AniList's recommendations; titles we already have on the NAS open their NAS page. */
+private suspend fun similarTitles(state: AppState, aniListId: Int?): List<Similar> {
+    if (aniListId == null) return emptyList()
+    val rec = runCatching { state.api.recommendations(aniListId) }.getOrDefault(emptyList())
+    val nas = state.library.mapNotNull { s -> s.aniListId?.let { it to s } }.toMap()
+    return rec.filter { it.id != aniListId }.map { m ->
+        nas[m.id]?.let { Similar(it.title, it.posterUrl, it.aniListId, it.id) } ?: Similar(m.title, m.coverUrl, m.id, null)
+    }
 }

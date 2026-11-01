@@ -64,6 +64,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
     val canCancel get() = isActive || status == "Paused"
 }
 @Serializable data class QueueSettings(val maxConcurrentDownloads: Int = 3)
+/** Space on the NAS disk (Profilo). */
+@Serializable data class StorageInfo(val totalBytes: Long = 0, val freeBytes: Long = 0, val libraryBytes: Long = 0, val reserveBytes: Long = 0) {
+    val usedBytes get() = (totalBytes - freeBytes).coerceAtLeast(0)
+}
 @Serializable data class PasskeyInfo(val id: Int, val name: String, val createdAt: String? = null, val lastUsedAt: String? = null)
 @Serializable data class TelegramStatus(val configured: Boolean, val loggedIn: Boolean)
 @Serializable data class TelegramLogin(val next: String? = null, val loggedIn: Boolean = false)
@@ -137,9 +141,16 @@ class Api(context: Context) {
     suspend fun queueSettings(): QueueSettings = get("api/settings/queue")
     suspend fun setQueueSettings(s: QueueSettings): QueueSettings = send("PUT", "api/settings/queue", s)
     suspend fun librarySearch(q: String): List<Series> = get("api/library/series", mapOf("q" to q))
+    /** Deletes an episode (file, subtitles, progress) from the NAS; the series goes with its last episode. */
+    suspend fun deleteEpisode(id: Int) { raw("DELETE", "api/library/episodes/$id") }
+    /** Deletes a whole series from the NAS to free space. */
+    suspend fun deleteSeries(id: Int) { raw("DELETE", "api/library/series/$id") }
+    suspend fun storage(): StorageInfo = get("api/settings/storage")
     suspend fun repairSeries(id: Int) { raw("POST", "api/library/series/$id/repair") }
     suspend fun repairEpisode(id: Int) { raw("POST", "api/library/episodes/$id/repair") }
     suspend fun trending(): List<Media> = get("api/anilist/trending")
+    /** "Simili": AniList's own recommendations for a title. */
+    suspend fun recommendations(id: Int): List<Media> = get("api/anilist/media/$id/recommendations")
     /** Esplora: one AniList season (WINTER, SPRING, SUMMER, FALL) of a year, optionally one genre. */
     suspend fun browse(season: String, year: Int, genre: String?): List<Media> =
         get("api/anilist/browse", buildMap { put("season", season); put("year", year.toString()); genre?.let { put("genre", it) } })

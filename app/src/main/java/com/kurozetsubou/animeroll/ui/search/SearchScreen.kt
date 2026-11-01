@@ -46,6 +46,10 @@ fun SearchScreen(state: AppState) {
     var trending by remember { mutableStateOf(state.home?.trending.orEmpty()) }
     var busy by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    // Opening a result hides the keyboard first.
+    fun open(aniListId: Int?, seriesId: Int?) { focusManager.clearFocus(); keyboard?.hide(); state.openDetail(aniListId, seriesId) }
 
     LaunchedEffect(Unit) {
         focus.requestFocus()
@@ -80,7 +84,7 @@ fun SearchScreen(state: AppState) {
             LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
                 item { Text("Di tendenza", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = AR.side, vertical = 8.dp)) }
                 items(trending, key = { it.id }) { m ->
-                    Row(Modifier.fillMaxWidth().clickable { state.openDetail(m.id, null) }.padding(horizontal = AR.side, vertical = 4.dp),
+                    Row(Modifier.fillMaxWidth().clickable { open(m.id, null) }.padding(horizontal = AR.side, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Thumb(m.bannerUrl ?: m.coverUrl, Modifier.width(140.dp))
                         Text(m.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -95,9 +99,9 @@ fun SearchScreen(state: AppState) {
             LazyVerticalGrid(GridCells.Fixed(3), contentPadding = PaddingValues(AR.side),
                 horizontalArrangement = Arrangement.spacedBy(AR.posterGap), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (nas.isNotEmpty()) item(span = { GridItemSpan(3) }) { Header("Sul tuo NAS") }
-                items(nas, key = { "n${it.id}" }) { s -> Poster(s.title, s.posterUrl, "${s.episodeCount} ep", width = null) { state.openDetail(s.aniListId, s.id) } }
+                items(nas, key = { "n${it.id}" }) { s -> Poster(s.title, s.posterUrl, "${s.episodeCount} ep", width = null) { open(s.aniListId, s.id) } }
                 if (alOnly.isNotEmpty()) item(span = { GridItemSpan(3) }) { Header("Su AniList") }
-                items(alOnly, key = { "a${it.id}" }) { m -> Poster(m.title, m.coverUrl, width = null) { state.openDetail(m.id, null) } }
+                items(alOnly, key = { "a${it.id}" }) { m -> Poster(m.title, m.coverUrl, width = null) { open(m.id, null) } }
                 if (!busy && nas.isEmpty() && alOnly.isEmpty()) item(span = { GridItemSpan(3) }) {
                     Text("Nessun risultato per “$q”.", color = AR.textSecondary, modifier = Modifier.padding(top = 24.dp))
                 }

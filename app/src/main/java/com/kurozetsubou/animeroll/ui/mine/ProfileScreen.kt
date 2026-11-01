@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kurozetsubou.animeroll.PasskeyInfo
 import com.kurozetsubou.animeroll.QueueSettings
+import com.kurozetsubou.animeroll.StorageInfo
+import com.kurozetsubou.animeroll.fileSize
 import com.kurozetsubou.animeroll.TelegramChannel
 import com.kurozetsubou.animeroll.TelegramStatus
 import com.kurozetsubou.animeroll.ui.AppState
@@ -44,6 +46,7 @@ fun ProfileScreen(state: AppState) {
     val api = state.api
     var passkeys by remember { mutableStateOf(emptyList<PasskeyInfo>()) }
     var queue by remember { mutableStateOf<QueueSettings?>(null) }
+    var storage by remember { mutableStateOf<StorageInfo?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var tg by remember { mutableStateOf<TelegramStatus?>(null) }
     var tgNext by remember { mutableStateOf<String?>(null) }
@@ -59,6 +62,7 @@ fun ProfileScreen(state: AppState) {
         state.refreshUser()
         passkeys = runCatching { api.passkeys() }.getOrDefault(emptyList())
         queue = runCatching { api.queueSettings() }.getOrNull()
+        storage = runCatching { api.storage() }.getOrNull()
         loadTelegram()
     }
 
@@ -101,6 +105,26 @@ fun ProfileScreen(state: AppState) {
                     runCatching { api.passkeyRegister(context as Activity, Build.MODEL) }
                         .onSuccess { message = "Passkey creata"; passkeys = runCatching { api.passkeys() }.getOrDefault(passkeys) }
                         .onFailure { message = it.message }
+                }
+            }
+        }
+        group("Spazio sul NAS", "Sotto la riserva il NAS rifiuta nuovi download e import. Per liberare spazio elimina episodi o serie dalla pagina del titolo.") {
+            val st = storage
+            if (st == null) Box(Modifier.padding(16.dp)) { CircularProgressIndicator(Modifier.size(22.dp), color = AR.accent, strokeWidth = 2.dp) }
+            else {
+                val low = st.freeBytes < st.reserveBytes * 2
+                val col = if (low) AR.danger else AR.accent
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("${st.freeBytes.fileSize()} liberi", fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = AR.display, color = if (low) AR.danger else Color.White, modifier = Modifier.weight(1f))
+                        Text("su ${st.totalBytes.fileSize()}", fontSize = 14.sp, color = AR.textTertiary)
+                    }
+                    LinearProgressIndicator({ if (st.totalBytes > 0) (st.usedBytes.toFloat() / st.totalBytes).coerceIn(0f, 1f) else 0f },
+                        Modifier.fillMaxWidth().height(6.dp).clip(AR.chipShape), color = col, trackColor = Color.White.copy(alpha = .16f))
+                    Row {
+                        Text("Libreria ${st.libraryBytes.fileSize()}", fontSize = 13.sp, color = AR.textSecondary, modifier = Modifier.weight(1f))
+                        Text("Riserva ${st.reserveBytes.fileSize()}", fontSize = 13.sp, color = AR.textTertiary)
+                    }
                 }
             }
         }

@@ -132,16 +132,24 @@ fun HomeScreen(state: AppState) {
     }
 }
 
-/** Featured card, auto-advances every 4.5 s; tilt parallax like before. */
+/** Featured cards: swipe left / right between them; auto-advances every 4.5 s, pausing after a swipe. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun HeroCarousel(state: AppState, items: List<Media>) {
-    var index by remember(items.map { it.id }) { mutableIntStateOf(0) }
-    LaunchedEffect(items.size) { while (items.size > 1) { delay(4500); index = (index + 1) % items.size } }
+    val pager = androidx.compose.foundation.pager.rememberPagerState { items.size }
+    LaunchedEffect(items.size) {
+        while (items.size > 1) {
+            delay(4500)
+            if (!pager.isScrollInProgress) pager.animateScrollToPage((pager.currentPage + 1) % items.size, animationSpec = AR.motion(420))
+        }
+    }
     Box(Modifier.padding(top = 16.dp, bottom = AR.shelfGap)) {
-        Crossfade(items[index.coerceIn(0, items.lastIndex)], animationSpec = AR.motion(420), label = "hero") { m -> HeroCard(state, m) }
+        androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxWidth(), beyondViewportPageCount = 1, key = { items[it].id }) { page ->
+            HeroCard(state, items[page])
+        }
         if (items.size > 1) Row(Modifier.align(Alignment.BottomEnd).padding(end = AR.side + 18.dp, bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items.indices.forEach { i ->
-                Box(Modifier.height(6.dp).width(if (i == index) 18.dp else 6.dp).clip(CircleShape).background(if (i == index) AR.accent else Color.White.copy(alpha = .4f)))
+                Box(Modifier.height(6.dp).width(if (i == pager.currentPage) 18.dp else 6.dp).clip(CircleShape).background(if (i == pager.currentPage) AR.accent else Color.White.copy(alpha = .4f)))
             }
         }
     }
