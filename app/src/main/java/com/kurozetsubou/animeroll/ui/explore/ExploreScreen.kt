@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -105,24 +106,23 @@ private fun SeasonPicker(season: Int, year: Int, onClose: () -> Unit, onApply: (
     BackHandler { onClose() }
     var s by remember { mutableIntStateOf(season) }
     var y by remember { mutableIntStateOf(year) }
-    val years = remember { val cur = Calendar.getInstance().get(Calendar.YEAR); (cur + 1 downTo cur - 4).toList() }
+    val years = remember { val cur = Calendar.getInstance().get(Calendar.YEAR); (cur + 1 downTo 1960).toList() }
     Column(Modifier.fillMaxSize().background(AR.background).statusBarsPadding().navigationBarsPadding().clickable(enabled = false) {}.padding(16.dp)) {
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Scegli stagione", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, fontFamily = AR.display, modifier = Modifier.weight(1f))
             IconButton(onClose) { Icon(Icons.Default.Close, "Chiudi") }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().weight(1f).padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PickerColumn("Stagione", SEASONS.map { it.first }, SEASONS[s].first, Modifier.weight(1f)) { s = SEASONS.indexOfFirst { n -> n.first == it } }
             PickerColumn("Anno", years.map { "$it" }, "$y", Modifier.weight(1f)) { y = it.toInt() }
         }
-        Spacer(Modifier.weight(1f))
-        PrimaryButton("Mostra ${SEASONS[s].first} $y", null, Modifier.fillMaxWidth()) { onApply(s, y) }
+        PrimaryButton("Mostra ${SEASONS[s].first} $y", null, Modifier.fillMaxWidth().padding(top = 12.dp)) { onApply(s, y) }
     }
 }
 
 @Composable
 private fun PickerColumn(title: String, options: List<String>, selected: String, modifier: Modifier, onPick: (String) -> Unit) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = AR.textTertiary, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
         options.forEach { o ->
             val on = o == selected
