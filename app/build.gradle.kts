@@ -41,6 +41,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-ui-compose:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
+    // libass renderer for ASS/SSA (full styling, signs, animations); the NAS sends the original ASS when it has one.
+    implementation("io.github.peerless2012:ass-media:0.5.1")
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("androidx.security:security-crypto:1.1.0")

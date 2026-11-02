@@ -40,6 +40,8 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import io.github.peerless2012.ass.media.type.AssRenderType
+import io.github.peerless2012.ass.media.kt.buildWithAssSupport
 import com.kurozetsubou.animeroll.ui.PlayRequest
 import com.kurozetsubou.animeroll.ui.components.PrimaryButton
 import com.kurozetsubou.animeroll.ui.theme.AR
@@ -60,14 +62,17 @@ fun VideoPlayer(req: PlayRequest, onProgress: (Double, Double?) -> Unit, onNext:
         val subtitles = req.subtitles
         val chosen = pickSubtitle(subtitles)
         val tracks = subtitles.map { s ->
-            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(s.url))
-                .setMimeType(MimeTypes.TEXT_VTT)
+            // ASS tracks go to libass with the original file (fonts embedded by the server); the rest stay WebVTT.
+            val ass = s.assUrl?.let { it + (if ('?' in it) "&" else "?") + "embed=1" }
+            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(ass ?: s.url))
+                .setMimeType(if (ass != null) MimeTypes.TEXT_SSA else MimeTypes.TEXT_VTT)
+                .setId((128 + s.index).toString())
                 .setLanguage(s.language)
                 .setLabel(s.label)
                 .setSelectionFlags(if (s == chosen) C.SELECTION_FLAG_DEFAULT else 0)
                 .build()
         }
-        ExoPlayer.Builder(context).build().apply {
+        ExoPlayer.Builder(context).buildWithAssSupport(context, AssRenderType.OVERLAY_OPEN_GL).apply {
             setMediaItem(MediaItem.Builder().setUri(req.url).setSubtitleConfigurations(tracks).build())
             trackSelectionParameters = trackSelectionParameters.buildUpon()
                 .setPreferredTextLanguage(chosen?.language ?: Locale.getDefault().language)

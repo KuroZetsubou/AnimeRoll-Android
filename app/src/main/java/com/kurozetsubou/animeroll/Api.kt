@@ -47,7 +47,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
     val trending: List<Media>, val seasonal: List<Media>,
 )
 @Serializable data class Subtitle(val index: Int, val language: String? = null, val label: String, val isDefault: Boolean = false,
-    val isForced: Boolean = false, val isSignsOnly: Boolean = false, val url: String)
+    val isForced: Boolean = false, val isSignsOnly: Boolean = false, val url: String, val assUrl: String? = null)
 @Serializable data class StreamInfo(val url: String, val downloadUrl: String, val resumeAt: Double? = null, val subtitles: List<Subtitle> = emptyList())
 @Serializable data class Provider(val id: String, val name: String, val enabled: Boolean, val canSearch: Boolean, val canListEpisodes: Boolean, val canStream: Boolean, val hint: String? = null)
 @Serializable data class SourceResult(val ref: String, val title: String, val posterUrl: String? = null, val subtitle: String? = null, val extra: Map<String, String>? = null)
