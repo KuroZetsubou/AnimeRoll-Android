@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 /** "Trova episodi": guided sheet. 1 Fonte, 2 Cerca (or a manual link), 3 Risultati → episodes → Scarica sul NAS. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SourcesSheet(api: Api, title: String, aniListId: Int?, onDownloads: () -> Unit, onDismiss: () -> Unit) {
+fun SourcesSheet(api: Api, title: String, aniListId: Int?, seriesId: Int?, onDownloads: () -> Unit, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var providers by remember { mutableStateOf(emptyList<Provider>()) }
     var provider by remember { mutableStateOf<Provider?>(null) }
@@ -48,6 +48,7 @@ fun SourcesSheet(api: Api, title: String, aniListId: Int?, onDownloads: () -> Un
     var sent by remember { mutableIntStateOf(0) }
     var link by remember { mutableStateOf("") }
     var number by remember { mutableStateOf("") }
+    var subtitleNote by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         providers = runCatching { api.providers() }.getOrDefault(emptyList()).filter { it.enabled }
@@ -150,6 +151,20 @@ fun SourcesSheet(api: Api, title: String, aniListId: Int?, onDownloads: () -> Un
                 }
             }
             error?.let { Text(it, color = AR.danger, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp)) }
+
+            if (!manual && picked != null && provider?.canSubtitles == true && seriesId != null) {
+                SecondaryButton("Aggiorna solo i sottotitoli (ASS)", Icons.Default.ClosedCaption, Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                    val p = provider ?: return@SecondaryButton
+                    val ref = picked?.ref ?: return@SecondaryButton
+                    subtitleNote = "Invio…"
+                    scope.launch {
+                        subtitleNote = runCatching { api.refreshSubtitles(seriesId, p.id, ref) }
+                            .map { r -> "${r.queued} episodi in coda per i sottotitoli" + (if (r.notFound.isEmpty()) "" else " · non trovati su ${p.name}: " + r.notFound.joinToString(", ") { n -> if (n % 1.0 == 0.0) n.toInt().toString() else n.toString() }) + ". Segui l'avanzamento in Download." }
+                            .getOrElse { it.message }
+                    }
+                }
+                subtitleNote?.let { Text(it, color = AR.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp)) }
+            }
 
             val count = if (manual) (if (link.isNotBlank()) 1 else 0) else if (picked != null) selected.size else 0
             PrimaryButton("Scarica sul NAS ($count)", Icons.Default.Download, Modifier.fillMaxWidth().padding(top = 20.dp), enabled = count > 0) {

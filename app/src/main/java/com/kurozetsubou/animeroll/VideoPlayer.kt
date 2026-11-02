@@ -1,6 +1,7 @@
 package com.kurozetsubou.animeroll
 
 import android.app.Activity
+import android.content.Context
 import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -57,13 +58,15 @@ import java.util.Locale
 fun VideoPlayer(req: PlayRequest, onProgress: (Double, Double?) -> Unit, onNext: (() -> Unit)?, onClose: () -> Unit) {
     val context = LocalContext.current
     val view = LocalView.current
+    // libass draws into the PlayerView's SubtitleView: without handing it over, ASS tracks are selected but never shown.
+    val playerView = remember { PlayerView(context).apply { useController = false; setShutterBackgroundColor(android.graphics.Color.BLACK) } }
     val player = remember {
         // WebVTT sidecars from the NAS: ExoPlayer keeps them in sync and shows overlapping lines.
         val subtitles = req.subtitles
         val chosen = pickSubtitle(subtitles)
         val tracks = subtitles.map { s ->
             // ASS tracks go to libass with the original file (fonts embedded by the server); the rest stay WebVTT.
-            val ass = s.assUrl?.let { it + (if ('?' in it) "&" else "?") + "embed=1" }
+            val ass = s.assUrl?.let { if (it.startsWith("file:")) it else it + (if ('?' in it) "&" else "?") + "embed=1" }
             MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(ass ?: s.url))
                 .setMimeType(if (ass != null) MimeTypes.TEXT_SSA else MimeTypes.TEXT_VTT)
                 .setId((128 + s.index).toString())
@@ -72,10 +75,11 @@ fun VideoPlayer(req: PlayRequest, onProgress: (Double, Double?) -> Unit, onNext:
                 .setSelectionFlags(if (s == chosen) C.SELECTION_FLAG_DEFAULT else 0)
                 .build()
         }
-        ExoPlayer.Builder(context).buildWithAssSupport(context, AssRenderType.OVERLAY_OPEN_GL).apply {
+        ExoPlayer.Builder(context).buildWithAssSupport(context, AssRenderType.OVERLAY_CANVAS, subtitleView = playerView.subtitleView).apply {
             setMediaItem(MediaItem.Builder().setUri(req.url).setSubtitleConfigurations(tracks).build())
             trackSelectionParameters = trackSelectionParameters.buildUpon()
                 .setPreferredTextLanguage(chosen?.language ?: Locale.getDefault().language)
+                .also { b -> context.getSharedPreferences("player", Context.MODE_PRIVATE).getString("audioLanguage", null)?.let { b.setPreferredAudioLanguage(it) } }
                 .setIgnoredTextSelectionFlags(0)
                 .build()
             prepare()
@@ -112,6 +116,7 @@ fun VideoPlayer(req: PlayRequest, onProgress: (Double, Double?) -> Unit, onNext:
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var textTracks by remember { mutableStateOf<List<Tracks.Group>>(emptyList()) }
+    var audioTracks by remember { mutableStateOf<List<Tracks.Group>>(emptyList()) }
     var controls by remember { mutableStateOf(true) }
     var seeking by remember { mutableStateOf<Float?>(null) }
     var lastTouch by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -120,7 +125,10 @@ fun VideoPlayer(req: PlayRequest, onProgress: (Double, Double?) -> Unit, onNext:
         val l = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying || player.playWhenReady }
             override fun onPlaybackStateChanged(state: Int) { buffering = state == Player.STATE_BUFFERING }
-            override fun onTracksChanged(tracks: Tracks) { textTracks = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT } }
+            override fun onTracksChanged(tracks: Tracks) {
+                textTracks = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+                audioTracks = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+            }
         }
         player.addListener(l)
         onDispose { player.removeListener(l) }
@@ -137,8 +145,7 @@ fun VideoPlayer(req: PlayRequest, onProgress: (Double, Double?) -> Unit, onNext:
     val nearEnd = duration > 0 && (duration - position < 90_000 || position.toFloat() / duration > 0.92f)
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView({ PlayerView(it).apply { this.player = player; useController = false; setShutterBackgroundColor(android.graphics.Color.BLACK) } },
-            Modifier.fillMaxSize())
+        AndroidView({ playerView.also { it.player = player } }, Modifier.fillMaxSize())
         // Tap anywhere: show / hide the controls.
         Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { controls = !controls; touch() })
 
@@ -155,6 +162,7 @@ fun VideoPlayer(req: PlayRequest, onProgress: (Double, Double?) -> Unit, onNext:
                         Text("Episodio ${req.episode.label}${req.episode.title?.let { " · $it" } ?: ""}${if (req.local) " · sul dispositivo" else ""}",
                             fontSize = 13.sp, color = AR.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    if (audioTracks.size > 1) AudioMenu(player, audioTracks) { touch() }
                     if (textTracks.isNotEmpty()) SubtitleMenu(player, textTracks) { touch() }
                 }
                 // Centre: ⏪10 ▶ ⏩10
@@ -212,6 +220,32 @@ private fun RoundIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
     else Modifier.background(Brush.verticalGradient(listOf(Color.White.copy(alpha = .22f), Color.White.copy(alpha = .10f))), CircleShape)
     Box(Modifier.size(size.dp).then(base).clip(CircleShape).clickable(onClick = onClick), Alignment.Center) {
         Icon(icon, label, tint = if (accent) AR.onAccent else Color.White, modifier = Modifier.size((size * (if (accent) 0.5f else 0.55f)).dp))
+    }
+}
+
+private fun audioLabel(f: androidx.media3.common.Format, index: Int): String {
+    val lang = f.language?.takeIf { it != "und" }?.let { runCatching { Locale.forLanguageTag(it).getDisplayLanguage(Locale.getDefault()).replaceFirstChar { c -> c.uppercase() } }.getOrNull() }
+    return f.label ?: lang ?: "Traccia ${index + 1}"
+}
+
+/** Dub picker for episodes with several audio tracks; the choice is remembered for the next episodes. */
+@Composable
+private fun AudioMenu(player: ExoPlayer, groups: List<Tracks.Group>, onUse: () -> Unit) {
+    val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton({ open = true; onUse() }) { Icon(Icons.Default.GraphicEq, "Lingua audio", tint = Color.White) }
+        DropdownMenu(open, { open = false }, Modifier.background(AR.surfaceStrong)) {
+            groups.forEachIndexed { i, g ->
+                val f = g.getTrackFormat(0)
+                DropdownMenuItem({ Text(audioLabel(f, i), fontWeight = if (g.isSelected) FontWeight.Bold else FontWeight.Normal) }, {
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
+                    f.language?.let { context.getSharedPreferences("player", Context.MODE_PRIVATE).edit().putString("audioLanguage", it).apply() }
+                    open = false
+                }, leadingIcon = { if (g.isSelected) Icon(Icons.Default.Check, null) else Spacer(Modifier.size(24.dp)) })
+            }
+        }
     }
 }
 

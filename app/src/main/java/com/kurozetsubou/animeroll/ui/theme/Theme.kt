@@ -96,8 +96,10 @@ fun AnimeRollTheme(content: @Composable () -> Unit) {
             secondaryContainer = AR.surfaceStrong, onSecondaryContainer = Color.White, error = AR.danger,
         ),
         typography = bodyTypography(),
-        content = content,
-    )
+    ) {
+        // Surface provides the content color (white on this dark scheme): without it Text defaults to black.
+        androidx.compose.material3.Surface(color = AR.background, contentColor = Color.White, content = content)
+    }
 }
 
 /** Light haptic tick (tab change, Play, add to device, chip selection). */

@@ -19,6 +19,17 @@ import com.kurozetsubou.animeroll.ui.MainScaffold
 import com.kurozetsubou.animeroll.ui.login.LoginScreen
 import com.kurozetsubou.animeroll.ui.theme.AR
 import com.kurozetsubou.animeroll.ui.theme.AnimeRollTheme
+import com.kurozetsubou.animeroll.User
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.io.IOException
 
 class MainActivity : ComponentActivity() {
@@ -52,11 +63,12 @@ fun AppRoot(api: Api, offline: OfflineStore, resumeTick: Int) {
 
     LaunchedEffect(Unit) {
         if (api.token != null) {
-            runCatching { api.me() }
+            // Away from home the NAS can hang instead of refusing: give up after a few seconds and open offline.
+            runCatching { withTimeout(8_000) { api.me() } }
                 .onSuccess { state.user = it; api.cachedUser = it; loggedIn = true }
                 .onFailure { e ->
                     // NAS unreachable: open with the last user, device downloads still play.
-                    if (e is IOException && api.cachedUser != null) { state.user = api.cachedUser; state.isOffline = true; loggedIn = true }
+                    if ((e is IOException || e is TimeoutCancellationException) && api.cachedUser != null) { state.user = api.cachedUser; state.isOffline = true; loggedIn = true }
                 }
         }
         checked = true
@@ -64,8 +76,26 @@ fun AppRoot(api: Api, offline: OfflineStore, resumeTick: Int) {
     LaunchedEffect(resumeTick, loggedIn) { if (loggedIn && resumeTick > 1) state.refreshUser() }
 
     when {
-        !checked -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = AR.accent) }
-        !loggedIn -> LoginScreen(api) { user -> state.user = user; api.cachedUser = user; loggedIn = true }
+        !checked -> LaunchScreen()
+        !loggedIn -> LoginScreen(api, onOffline = if (offline.items.isEmpty()) null else ({
+            val guest = User("00000000-0000-0000-0000-000000000000", "Offline", false)
+            state.user = guest; state.isOffline = true; loggedIn = true
+        })) { user -> state.user = user; api.cachedUser = user; loggedIn = true }
         else -> MainScaffold(state)
+    }
+}
+
+/** Shown at launch while the login is checked with the NAS. */
+@Composable
+fun LaunchScreen() {
+    Box(Modifier.fillMaxSize(), Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(28.dp)) {
+            Row {
+                Text("Anime", fontSize = 52.sp, fontWeight = FontWeight.ExtraBold, fontFamily = AR.display, letterSpacing = (-1).sp)
+                Text("Roll", fontSize = 52.sp, fontWeight = FontWeight.ExtraBold, fontFamily = AR.display, letterSpacing = (-1).sp, color = AR.accent)
+            }
+            CircularProgressIndicator(color = AR.accent, modifier = Modifier.size(36.dp))
+            Text("Caricamento…", color = AR.textSecondary, fontSize = 16.sp)
+        }
     }
 }

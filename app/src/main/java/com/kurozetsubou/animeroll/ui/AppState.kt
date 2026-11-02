@@ -91,7 +91,13 @@ class AppState(val api: Api, val offline: OfflineStore, val scope: CoroutineScop
         val saved = offline.item(ep.id)?.takeIf { offline.state(it).done }
         if (saved != null) {
             val f: File = offline.file(saved)
-            playing = PlayRequest(ep, series, playlist, android.net.Uri.fromFile(f).toString(), ep.positionSeconds, emptyList(), local = true)
+            var subs = offline.subtitles(ep.id)
+            if (subs.isEmpty()) {
+                // Saved before subtitles were kept: fetch them now if the NAS answers (quickly), for this and the next plays.
+                runCatching { kotlinx.coroutines.withTimeoutOrNull(3_000) { api.stream(ep.id).subtitles } }.getOrNull()
+                    ?.takeIf { it.isNotEmpty() }?.let { offline.saveSubtitles(ep.id, it); subs = offline.subtitles(ep.id) }
+            }
+            playing = PlayRequest(ep, series, playlist, android.net.Uri.fromFile(f).toString(), ep.positionSeconds, subs, local = true)
             return@launch
         }
         runCatching { api.stream(ep.id) }

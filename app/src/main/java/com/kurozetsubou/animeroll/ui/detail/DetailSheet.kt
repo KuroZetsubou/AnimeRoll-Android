@@ -13,6 +13,8 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyRow
@@ -75,6 +77,7 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
     var confirmRepair by remember { mutableStateOf(false) }
     var confirmDeleteSeries by remember { mutableStateOf(false) }
     var episodeToDelete by remember { mutableStateOf<Episode?>(null) }
+    var moving by remember { mutableStateOf<List<Episode>?>(null) }
     var tab by remember(target) { mutableIntStateOf(0) }
     var showStatus by remember { mutableStateOf(false) }
     var similar by remember(target) { mutableStateOf<List<Similar>?>(null) }
@@ -151,7 +154,7 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
                 item {
                     Column(Modifier.padding(horizontal = AR.side).offset(y = (-56).dp)) {
                         Text(title, fontSize = 32.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, fontFamily = AR.display)
-                        media?.titleRomaji?.takeIf { it != title }?.let { Text(it, fontSize = 13.sp, color = AR.textTertiary, modifier = Modifier.padding(top = 4.dp)) }
+                        media?.titleRomaji?.takeIf { it != title }?.let { Text(it, fontSize = 13.sp, color = AR.textSecondary, modifier = Modifier.padding(top = 4.dp)) }
                         MetaRow(media, series)
                         val alId = media?.id ?: series?.aniListId
                         if (alId != null && (entry != null || state.user?.aniListConnected == true)) {
@@ -175,7 +178,7 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
                             PrimaryButton("Trova episodi", Icons.Default.Search, Modifier.fillMaxWidth()) { showSources = true }
                         }
                         Description((media?.description ?: series?.description).stripHtml().trim())
-                        Segmented(listOf("Episodi", "Simili"), tab) { tab = it }
+                        Segmented(listOf("Episodi", "Simili"), tab, Modifier.padding(top = 18.dp)) { tab = it }
                     }
                 }
                 if (tab == 0) {
@@ -187,6 +190,8 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
                         Row(Modifier.fillMaxWidth().offset(y = (-48).dp).padding(horizontal = AR.side), horizontalArrangement = Arrangement.End) {
                             SecondaryButton("Ripara serie", Icons.Default.Build, small = true, ghost = true) { confirmRepair = true }
                             Spacer(Modifier.width(8.dp))
+                            SecondaryButton("Sposta serie", Icons.Default.SwapHoriz, small = true, ghost = true) { moving = episodes }
+                            Spacer(Modifier.width(8.dp))
                             SecondaryButton("Elimina serie", Icons.Default.Delete, small = true, ghost = true) { confirmDeleteSeries = true }
                             Spacer(Modifier.width(8.dp))
                             SecondaryButton("Scarica tutti sul dispositivo", Icons.Default.Download, small = true, ghost = true) {
@@ -194,16 +199,19 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
                             }
                         }
                     }
-                    items(episodes, key = { it.id }) { ep -> Box(Modifier.offset(y = (-48).dp)) { EpisodeRow(state, ep, series!!, episodes, tickN, alProgress = entry?.progress ?: 0, onDelete = { episodeToDelete = ep }) } }
+                    items(episodes, key = { it.id }) { ep -> Box(Modifier.offset(y = (-48).dp)) { EpisodeRow(state, ep, series!!, episodes, tickN, alProgress = entry?.progress ?: 0, onDelete = { episodeToDelete = ep }, onMove = { moving = listOf(ep) }) } }
                 } else {
-                    item {
-                        Box(Modifier.offset(y = (-40).dp)) {
-                            if (similar == null) Box(Modifier.fillMaxWidth().padding(AR.side), Alignment.Center) { CircularProgressIndicator(color = AR.accent) }
-                            else if (similar!!.isEmpty()) Text("Nessun titolo simile", color = AR.textTertiary, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(AR.side))
-                            else LazyRow(contentPadding = PaddingValues(horizontal = AR.side), horizontalArrangement = Arrangement.spacedBy(AR.posterGap)) {
-                                items(similar!!, key = { "${it.aniListId}-${it.seriesId}" }) { s -> Poster(s.title, s.poster) { state.openDetail(s.aniListId, s.seriesId) } }
-                            }
-                        }
+                    // Posters wrap into rows of three; the sheet scrolls vertically.
+                    val list = similar
+                    if (list == null) item { Box(Modifier.fillMaxWidth().offset(y = (-40).dp).padding(AR.side), Alignment.Center) { CircularProgressIndicator(color = AR.accent) } }
+                    else if (list.isEmpty()) item { Text("Nessun titolo simile", color = AR.textTertiary, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().offset(y = (-40).dp).padding(AR.side)) }
+                    else {
+                        val related = list.filter { it.relation != null }
+                        val rest = list.filter { it.relation == null }
+                        if (related.isNotEmpty()) item { Text("Stagioni e correlati", fontSize = 17.sp, fontWeight = FontWeight.Bold, fontFamily = AR.display, modifier = Modifier.fillMaxWidth().offset(y = (-40).dp).padding(horizontal = AR.side).padding(bottom = 10.dp)) }
+                        items(related.chunked(3), key = { row -> "r-" + row.first().let { "${it.aniListId}-${it.seriesId}" } }) { row -> SimilarRow(state, row) }
+                        if (rest.isNotEmpty()) item { Text("Simili", fontSize = 17.sp, fontWeight = FontWeight.Bold, fontFamily = AR.display, modifier = Modifier.fillMaxWidth().offset(y = (-40).dp).padding(horizontal = AR.side).padding(top = if (related.isEmpty()) 0.dp else 8.dp, bottom = 10.dp)) }
+                        items(rest.chunked(3), key = { row -> "s-" + row.first().let { "${it.aniListId}-${it.seriesId}" } }) { row -> SimilarRow(state, row) }
                     }
                 }
             }
@@ -216,14 +224,23 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
             Orientation.Horizontal, onDragStopped = { settle() }))
     }
 
-    if (showSources) SourcesSheet(api, title, media?.id ?: series?.aniListId, onDownloads = { onClose(); state.tab = com.kurozetsubou.animeroll.ui.Tab.Downloads }) { showSources = false }
-    if (showStatus) AniListStatusSheet(entry?.status, onDismiss = { showStatus = false }) { st ->
+    if (showSources) SourcesSheet(api, title, media?.id ?: series?.aniListId, series?.id, onDownloads = { onClose(); state.tab = com.kurozetsubou.animeroll.ui.Tab.Downloads }) { showSources = false }
+    if (showStatus) AniListStatusSheet(entry?.status, entry?.progress ?: 0, media?.episodes, onProgress = { n ->
+        val id = media?.id ?: series?.aniListId
+        if (id != null) scope.launch { runCatching { api.setAniListProgress(id, n) }.onSuccess { entry = runCatching { api.entry(id) }.getOrNull() }.onFailure { state.toast(it.message) } }
+    }, onDismiss = { showStatus = false }) { st ->
         showStatus = false
         val id = media?.id ?: series?.aniListId
         if (id != null) scope.launch {
             runCatching { api.setAniListStatus(id, st) }.onSuccess {
                 entry = runCatching { api.entry(id) }.getOrNull(); if (id !in state.inList) state.inList.add(id); state.refresh()
             }.onFailure { state.toast(it.message) }
+        }
+    }
+    moving?.let { eps ->
+        MoveSheet(api, eps, title, onDismiss = { moving = null }) { newSeriesId ->
+            moving = null
+            if (newSeriesId != series?.id) { state.refresh(); onClose() } else scope.launch { loadEpisodes() }
         }
     }
     episodeToDelete?.let { ep ->
@@ -277,7 +294,8 @@ private fun Banner(url: String?) {
     Box(Modifier.fillMaxWidth().height(300.dp)) {
         AsyncImage(url, null, contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = zoom.value; scaleY = zoom.value }.background(AR.surface))
-        Box(Modifier.fillMaxSize().background(AR.scrimBottom))
+        // Fades fully into the sheet so the title and the line under it never sit on a bright picture.
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to SheetBg.copy(alpha = .25f), 0.75f to SheetBg.copy(alpha = .85f), 1f to SheetBg)))
     }
 }
 
@@ -299,10 +317,21 @@ private fun alStatusLabel(s: String) = when (s) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AniListStatusSheet(current: String?, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+private fun AniListStatusSheet(current: String?, progress: Int, total: Int?, onProgress: (Int) -> Unit, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    var count by remember { mutableIntStateOf(progress) }
     ModalBottomSheet(onDismiss, containerColor = AR.surfaceStrong, shape = AR.sheetShape) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
             Text("Stato su AniList", fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = AR.display, modifier = Modifier.padding(bottom = 8.dp))
+            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Episodi guardati", fontSize = 16.sp)
+                    total?.let { Text("su $it", fontSize = 12.sp, color = AR.textTertiary) }
+                }
+                IconButton({ if (count > 0) { count--; onProgress(count) } }) { Icon(Icons.Default.Remove, "Uno in meno") }
+                Text("$count", fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 32.dp), textAlign = TextAlign.Center)
+                IconButton({ if (count < (total ?: 9999)) { count++; onProgress(count) } }) { Icon(Icons.Default.Add, "Uno in più") }
+            }
+            HorizontalDivider(color = AR.hairline)
             listOf("CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED").forEach { st ->
                 Row(Modifier.fillMaxWidth().height(50.dp).clickable { onPick(st) }, verticalAlignment = Alignment.CenterVertically) {
                     Text(alStatusLabel(st), fontSize = 16.sp, modifier = Modifier.weight(1f))
@@ -318,8 +347,8 @@ private fun AniListStatusSheet(current: String?, onDismiss: () -> Unit, onPick: 
 private fun Description(text: String) {
     if (text.isBlank()) return
     var expanded by remember { mutableStateOf(false) }
-    Column(Modifier.animateContentSize(AR.motion()).clickable { expanded = !expanded }) {
-        Text(text, fontSize = 14.sp, lineHeight = 20.sp, maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
+    Column(Modifier.padding(top = 18.dp).animateContentSize(AR.motion()).clickable { expanded = !expanded }) {
+        Text(text, fontSize = 14.sp, lineHeight = 21.sp, color = AR.textSecondary, maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
         if (!expanded) Text("altro", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AR.textSecondary)
     }
 }
@@ -344,13 +373,16 @@ private fun DeviceDownloadButton(state: AppState, ep: Episode, series: Series, t
 }
 
 fun startDeviceDownload(state: AppState, ep: Episode, series: Series) = state.scope.launch {
-    runCatching { state.offline.download(state.api.stream(ep.id).downloadUrl, ep, series) }
-        .onSuccess { state.toast("Download sul dispositivo avviato") }.onFailure { state.toast(it.message) }
+    runCatching {
+        val info = state.api.stream(ep.id)
+        state.offline.download(info.downloadUrl, ep, series)
+        state.offline.saveSubtitles(ep.id, info.subtitles)
+    }.onSuccess { state.toast("Download sul dispositivo avviato") }.onFailure { state.toast(it.message) }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<Episode>, tick: Int, alProgress: Int, onDelete: () -> Unit) {
+private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<Episode>, tick: Int, alProgress: Int, onDelete: () -> Unit, onMove: () -> Unit) {
     val context = LocalContext.current
     val view = LocalView.current
     var menu by remember { mutableStateOf(false) }
@@ -403,14 +435,76 @@ private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<E
     }
 }
 
-private data class Similar(val title: String, val poster: String?, val aniListId: Int?, val seriesId: Int?)
+private data class Similar(val title: String, val poster: String?, val aniListId: Int?, val seriesId: Int?, val relation: String? = null)
+
+@Composable
+private fun SimilarRow(state: AppState, row: List<Similar>) {
+    Row(Modifier.fillMaxWidth().offset(y = (-40).dp).padding(horizontal = AR.side).padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(AR.posterGap)) {
+        row.forEach { s -> Box(Modifier.weight(1f)) { Poster(s.title, s.poster, width = null, meta = s.relation) { state.openDetail(s.aniListId, s.seriesId) } } }
+        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+    }
+}
 
 /** AniList's recommendations; titles we already have on the NAS open their NAS page. */
 private suspend fun similarTitles(state: AppState, aniListId: Int?): List<Similar> {
     if (aniListId == null) return emptyList()
     val rec = runCatching { state.api.recommendations(aniListId) }.getOrDefault(emptyList())
+    val rel = runCatching { state.api.relations(aniListId) }.getOrDefault(emptyList())
     val nas = state.library.mapNotNull { s -> s.aniListId?.let { it to s } }.toMap()
-    return rec.filter { it.id != aniListId }.map { m ->
-        nas[m.id]?.let { Similar(it.title, it.posterUrl, it.aniListId, it.id) } ?: Similar(m.title, m.coverUrl, m.id, null)
+    fun pick(m: Media, relation: String?) = nas[m.id]?.let { Similar(it.title, it.posterUrl, it.aniListId, it.id, relation) } ?: Similar(m.title, m.coverUrl, m.id, null, relation)
+    // Related titles first (with their relation), then the recommendations that are not already among them.
+    val related = rel.map { pick(it.media, it.relation) }
+    val relatedIds = rel.map { it.media.id }.toSet()
+    return related + rec.filter { it.id != aniListId && it.id !in relatedIds }.map { pick(it, null) }
+}
+
+
+/** "Sposta in un'altra serie": pick the right AniList title (e.g. the correct season); files, subtitles and progress follow. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MoveSheet(api: Api, eps: List<Episode>, fromTitle: String, onDismiss: () -> Unit, onDone: (Int) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf(fromTitle) }
+    var results by remember { mutableStateOf(emptyList<Media>()) }
+    var picked by remember { mutableStateOf<Media?>(null) }
+    var offset by remember { mutableStateOf("0") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(query) {
+        delay(350)
+        if (query.length > 1) results = runCatching { api.search(query) }.getOrDefault(emptyList())
+    }
+    val shift = offset.replace(",", ".").toDoubleOrNull() ?: 0.0
+    ModalBottomSheet(onDismiss, containerColor = AR.surfaceStrong, shape = AR.sheetShape) {
+        Column(Modifier.padding(horizontal = 20.dp).fillMaxHeight(0.85f).verticalScroll(rememberScrollState()).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Sposta in un'altra serie", fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = AR.display)
+            Text("Sposti ${if (eps.size == 1) "l'episodio ${eps[0].label}" else "${eps.size} episodi"} di «$fromTitle». Il file, i sottotitoli e i progressi vanno con loro.", fontSize = 13.sp, color = AR.textSecondary)
+            val p = picked
+            if (p == null) {
+                OutlinedTextField(query, { query = it }, label = { Text("Cerca la serie giusta su AniList") }, singleLine = true, shape = AR.cardShape, modifier = Modifier.fillMaxWidth())
+                results.forEach { m ->
+                    Column(Modifier.fillMaxWidth().clickable { picked = m }.padding(vertical = 10.dp)) {
+                        Text(m.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                        Text(listOfNotNull(m.year?.toString(), m.format, m.episodes?.let { "$it ep" }).joinToString(" · "), fontSize = 12.sp, color = AR.textTertiary)
+                    }
+                    HorizontalDivider(color = AR.hairline)
+                }
+            } else {
+                Text(p.title, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(offset, { offset = it }, label = { Text("Cambia il numero degli episodi di") }, singleLine = true, shape = AR.cardShape, modifier = Modifier.fillMaxWidth())
+                Text("Esempio: se l'episodio 13 qui è il primo della nuova serie, metti -12." +
+                    (if (eps.size == 1) " L'episodio ${eps[0].label} diventerà il ${(eps[0].number + shift).let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }}." else ""),
+                    fontSize = 12.sp, color = AR.textTertiary)
+                error?.let { Text(it, color = AR.danger, fontSize = 13.sp) }
+                PrimaryButton(if (busy) "Spostamento…" else "Sposta in «${p.title}»", null, Modifier.fillMaxWidth(), enabled = !busy) {
+                    busy = true; error = null
+                    scope.launch {
+                        runCatching { api.moveEpisodes(eps.map { it.id }, p.id, shift) }
+                            .onSuccess { onDone(it.seriesId) }.onFailure { error = it.message; busy = false }
+                    }
+                }
+                SecondaryButton("Scegli un'altra serie", null, Modifier.fillMaxWidth(), ghost = true) { picked = null }
+            }
+        }
     }
 }

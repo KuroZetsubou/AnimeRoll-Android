@@ -49,7 +49,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 @Serializable data class Subtitle(val index: Int, val language: String? = null, val label: String, val isDefault: Boolean = false,
     val isForced: Boolean = false, val isSignsOnly: Boolean = false, val url: String, val assUrl: String? = null)
 @Serializable data class StreamInfo(val url: String, val downloadUrl: String, val resumeAt: Double? = null, val subtitles: List<Subtitle> = emptyList())
-@Serializable data class Provider(val id: String, val name: String, val enabled: Boolean, val canSearch: Boolean, val canListEpisodes: Boolean, val canStream: Boolean, val hint: String? = null)
+@Serializable data class Related(val relation: String, val media: Media)
+@Serializable data class MoveEpisodesRequest(val episodeIds: List<Int>, val aniListId: Int, val numberOffset: Double)
+@Serializable data class MoveEpisodesResult(val seriesId: Int)
+@Serializable data class SubtitleRefreshRequest(val source: String, val seriesRef: String)
+@Serializable data class SubtitleRefreshResult(val queued: Int = 0, val notFound: List<Double> = emptyList())
+@Serializable data class Provider(val id: String, val name: String, val enabled: Boolean, val canSearch: Boolean, val canListEpisodes: Boolean, val canStream: Boolean, val hint: String? = null, val canSubtitles: Boolean? = null)
 @Serializable data class SourceResult(val ref: String, val title: String, val posterUrl: String? = null, val subtitle: String? = null, val extra: Map<String, String>? = null)
 @Serializable data class SourceEpisode(val ref: String, val number: Double? = null, val title: String, val extra: Map<String, String>? = null)
 @Serializable data class DownloadItem(val sourceRef: String, val episodeNumber: Double? = null)
@@ -147,9 +152,18 @@ class Api(context: Context) {
     suspend fun deleteSeries(id: Int) { raw("DELETE", "api/library/series/$id") }
     suspend fun storage(): StorageInfo = get("api/settings/storage")
     suspend fun repairSeries(id: Int) { raw("POST", "api/library/series/$id/repair") }
+    /** Queues the original (ASS) subtitles from a source for every episode of the series; no video is downloaded. */
+    suspend fun refreshSubtitles(seriesId: Int, source: String, seriesRef: String): SubtitleRefreshResult =
+        send("POST", "api/library/series/$seriesId/subtitles", SubtitleRefreshRequest(source, seriesRef))
     suspend fun repairEpisode(id: Int) { raw("POST", "api/library/episodes/$id/repair") }
     suspend fun trending(): List<Media> = get("api/anilist/trending")
     /** "Simili": AniList's own recommendations for a title. */
+    /** Seasons before/after, side stories, spin-offs (relation already in Italian). */
+    suspend fun relations(id: Int): List<Related> = get("api/anilist/media/$id/relations")
+    suspend fun setAniListProgress(mediaId: Int, progress: Int) { raw("PUT", "api/anilist/entry/$mediaId/progress", """{"progress":$progress}""") }
+    /** Moves episodes to another series (by AniList id); numberOffset is added to every episode number. */
+    suspend fun moveEpisodes(ids: List<Int>, aniListId: Int, numberOffset: Double): MoveEpisodesResult =
+        send("POST", "api/library/episodes/move", MoveEpisodesRequest(ids, aniListId, numberOffset))
     suspend fun recommendations(id: Int): List<Media> = get("api/anilist/media/$id/recommendations")
     /** Esplora: one AniList season (WINTER, SPRING, SUMMER, FALL) of a year, optionally one genre. */
     suspend fun browse(season: String, year: Int, genre: String?): List<Media> =

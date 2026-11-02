@@ -66,7 +66,38 @@ class OfflineStore(private val context: Context) {
 
     fun totalBytes() = items.sumOf { file(it).takeIf { f -> f.exists() }?.length() ?: 0L }
 
+    private val subsDir get() = File(context.filesDir, "offline-subs").also { it.mkdirs() }
+    private val subsHttp = okhttp3.OkHttpClient()
+
+    /** Subtitles saved with the episode (WebVTT, plus the original ASS with its fonts), as file:// tracks. Empty if none. */
+    fun subtitles(episodeId: Int): List<Subtitle> {
+        val index = File(subsDir, "$episodeId.json").takeIf { it.exists() } ?: return emptyList()
+        val tracks = runCatching { json.decodeFromString<List<Subtitle>>(index.readText()) }.getOrDefault(emptyList())
+        return tracks.mapNotNull { t ->
+            val vtt = File(subsDir, "$episodeId.s${t.index}.vtt").takeIf { it.exists() } ?: return@mapNotNull null
+            val ass = File(subsDir, "$episodeId.s${t.index}.ass").takeIf { it.exists() }
+            t.copy(url = Uri.fromFile(vtt).toString(), assUrl = ass?.let { Uri.fromFile(it).toString() })
+        }
+    }
+
+    private fun fetch(url: String): ByteArray? = runCatching {
+        subsHttp.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
+    }.getOrNull()
+
+    /** Small files, fetched right away next to the video: the episode then plays with subtitles without the NAS. */
+    suspend fun saveSubtitles(episodeId: Int, tracks: List<Subtitle>) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val saved = mutableListOf<Subtitle>()
+        for (t in tracks) {
+            val vtt = fetch(t.url) ?: continue
+            File(subsDir, "$episodeId.s${t.index}.vtt").writeBytes(vtt)
+            t.assUrl?.let { a -> fetch(a + (if ('?' in a) "&" else "?") + "embed=1") }?.let { File(subsDir, "$episodeId.s${t.index}.ass").writeBytes(it) }
+            saved += t
+        }
+        if (saved.isNotEmpty()) File(subsDir, "$episodeId.json").writeText(json.encodeToString(saved))
+    }
+
     fun delete(item: OfflineItem) {
+        subsDir.listFiles { f -> f.name.startsWith("${item.episode.id}.") }?.forEach { it.delete() }
         dm.remove(item.downloadId)
         file(item).delete()
         items.remove(item)

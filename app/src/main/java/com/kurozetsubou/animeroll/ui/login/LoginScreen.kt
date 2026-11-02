@@ -30,7 +30,7 @@ import com.kurozetsubou.animeroll.ui.theme.AR
 import kotlinx.coroutines.launch
 
 @Composable
-fun LoginScreen(api: Api, onLogin: (User) -> Unit) {
+fun LoginScreen(api: Api, onOffline: (() -> Unit)? = null, onLogin: (User) -> Unit) {
     val activity = LocalContext.current as Activity
     val scope = rememberCoroutineScope()
     var server by remember { mutableStateOf(api.baseUrl) }
@@ -71,6 +71,7 @@ fun LoginScreen(api: Api, onLogin: (User) -> Unit) {
             SecondaryButton("Accedi con passkey", Icons.Default.Key, Modifier.fillMaxWidth().height(52.dp), ghost = true) {
                 if (!busy) run { api.passkeyLogin(activity, username.ifBlank { null }) }
             }
+            onOffline?.let { SecondaryButton("Guarda i download offline", Icons.Default.Key, Modifier.fillMaxWidth().height(52.dp), ghost = true) { it() } }
             error?.let { Text(it, color = AR.danger) }
         }
     }
