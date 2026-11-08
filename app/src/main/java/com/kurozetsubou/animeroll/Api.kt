@@ -29,7 +29,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
     val id: Int, val title: String, val titleRomaji: String? = null, val description: String? = null,
     val coverUrl: String? = null, val bannerUrl: String? = null, val episodes: Int? = null, val year: Int? = null,
     val format: String? = null, val genres: List<String> = emptyList(), val averageScore: Int? = null,
-    val status: String? = null, val nextAiringEpisode: Int? = null,
+    val status: String? = null, val nextAiringEpisode: Int? = null, val nextAiringAt: Long? = null,
 )
 @Serializable data class Entry(val media: Media, val status: String, val progress: Int)
 @Serializable data class Series(

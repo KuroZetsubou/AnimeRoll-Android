@@ -309,6 +309,13 @@ private fun MetaRow(media: Media?, series: Series?) {
         Text(parts.joinToString(" · "), fontSize = 13.sp, color = AR.textSecondary, modifier = Modifier.weight(1f, false))
         if ((series?.episodeCount ?: 0) > 0) Badge("Sul NAS")
     }
+    val at = media?.nextAiringAt
+    val ep = media?.nextAiringEpisode
+    if (at != null && ep != null) {
+        val f = java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.ITALIAN)
+        Text("Prossimo episodio (E$ep): ${f.format(java.util.Date(at * 1000))}", fontSize = 13.sp, color = AR.teal,
+            modifier = Modifier.padding(bottom = 10.dp))
+    }
 }
 
 private fun alStatusLabel(s: String) = when (s) {
