@@ -37,6 +37,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
     val posterUrl: String? = null, val bannerUrl: String? = null, val totalEpisodes: Int? = null, val episodeCount: Int = 0,
     val titleRomaji: String? = null, val genres: String? = null, val year: Int? = null, val updatedAt: String? = null,
 ) { val genreList get() = genres.orEmpty().split(",").map { it.trim() }.filter { it.isNotEmpty() } }
+/** Hand edits of a series: null leaves a field as it is, "" clears it, aniListId 0 unlinks. */
+@Serializable data class SeriesEdit(
+    val title: String? = null, val description: String? = null, val posterUrl: String? = null, val bannerUrl: String? = null,
+    val aniListId: Int? = null, val refreshFromAniList: Boolean = false,
+)
 @Serializable data class Episode(
     val id: Int, val seriesId: Int, val number: Double, val title: String? = null, val sizeBytes: Long = 0,
     val durationSeconds: Double? = null, val source: String, val positionSeconds: Double? = null, val completed: Boolean = false,
@@ -150,6 +155,8 @@ class Api(context: Context) {
     suspend fun librarySearch(q: String): List<Series> = get("api/library/series", mapOf("q" to q))
     /** Deletes an episode (file, subtitles, progress) from the NAS; the series goes with its last episode. */
     suspend fun deleteEpisode(id: Int) { raw("DELETE", "api/library/episodes/$id") }
+    /** Fixes a series' title, description, images and AniList link, or re-reads them from AniList. */
+    suspend fun editSeries(id: Int, edit: SeriesEdit): Series = send("PATCH", "api/library/series/$id", edit)
     /** Fixes the number of one episode and/or flags it as extra content (EX1, not counted on AniList). */
     suspend fun editEpisode(id: Int, number: Double, isExtra: Boolean) { raw("PATCH", "api/library/episodes/$id", """{"number":$number,"isExtra":$isExtra}""") }
     /** Deletes a whole series from the NAS to free space. */

@@ -81,6 +81,7 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
     var episodeToDelete by remember { mutableStateOf<Episode?>(null) }
     var moving by remember { mutableStateOf<List<Episode>?>(null) }
     var editing by remember { mutableStateOf<Episode?>(null) }
+    var editingSeries by remember { mutableStateOf(false) }
     var tab by remember(target) { mutableIntStateOf(0) }
     var showStatus by remember { mutableStateOf(false) }
     var similar by remember(target) { mutableStateOf<List<Similar>?>(null) }
@@ -193,6 +194,8 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
                         Row(Modifier.fillMaxWidth().offset(y = (-48).dp).padding(horizontal = AR.side), horizontalArrangement = Arrangement.End) {
                             SecondaryButton("Ripara serie", Icons.Default.Build, small = true, ghost = true) { confirmRepair = true }
                             Spacer(Modifier.width(8.dp))
+                            SecondaryButton("Modifica info", Icons.Default.Edit, small = true, ghost = true) { editingSeries = true }
+                            Spacer(Modifier.width(8.dp))
                             SecondaryButton("Sposta serie", Icons.Default.SwapHoriz, small = true, ghost = true) { moving = episodes }
                             Spacer(Modifier.width(8.dp))
                             SecondaryButton("Elimina serie", Icons.Default.Delete, small = true, ghost = true) { confirmDeleteSeries = true }
@@ -244,6 +247,12 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
         MoveSheet(api, eps, title, onDismiss = { moving = null }) { newSeriesId ->
             moving = null
             if (newSeriesId != series?.id) { state.refresh(); onClose() } else scope.launch { loadEpisodes() }
+        }
+    }
+    if (editingSeries) series?.let { s ->
+        EditSeriesSheet(api, s, onDismiss = { editingSeries = false }) { updated, relinked ->
+            editingSeries = false
+            if (relinked) { state.refresh(); onClose() } else { series = updated; scope.launch { loadEpisodes() }; state.refresh() }
         }
     }
     editing?.let { ep ->
@@ -544,6 +553,46 @@ private fun MoveSheet(api: Api, eps: List<Episode>, fromTitle: String, onDismiss
                 }
                 SecondaryButton("Scegli un'altra serie", null, Modifier.fillMaxWidth(), ghost = true) { picked = null }
             }
+        }
+    }
+}
+
+/** "Modifica info": fixes title, description, poster, banner and AniList link; "Aggiorna da AniList" re-reads them. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditSeriesSheet(api: Api, s: Series, onDismiss: () -> Unit, onDone: (Series, Boolean) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var title by remember(s.id) { mutableStateOf(s.title) }
+    var alId by remember(s.id) { mutableStateOf(s.aniListId?.toString() ?: "") }
+    var poster by remember(s.id) { mutableStateOf(s.posterUrl ?: "") }
+    var banner by remember(s.id) { mutableStateOf(s.bannerUrl ?: "") }
+    var desc by remember(s.id) { mutableStateOf(s.description ?: "") }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
+    val newId = alId.trim().ifEmpty { "0" }.toIntOrNull()
+    fun save(refresh: Boolean) {
+        val id = newId ?: return
+        busy = true; err = null
+        scope.launch {
+            runCatching {
+                api.editSeries(s.id, SeriesEdit(title, desc, poster, banner, aniListId = id.takeIf { it != (s.aniListId ?: 0) }, refreshFromAniList = refresh))
+            }.onSuccess { onDone(it, id != (s.aniListId ?: 0)) }.onFailure { err = it.message }
+            busy = false
+        }
+    }
+    ModalBottomSheet(onDismiss, containerColor = AR.surfaceStrong, shape = AR.sheetShape) {
+        Column(Modifier.padding(horizontal = 20.dp).fillMaxHeight(0.9f).verticalScroll(rememberScrollState()).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Modifica info", fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = AR.display)
+            OutlinedTextField(title, { title = it }, label = { Text("Titolo") }, shape = AR.cardShape, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(alId, { alId = it }, label = { Text("ID AniList (vuoto = nessun collegamento)") }, singleLine = true, shape = AR.cardShape,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(poster, { poster = it }, label = { Text("Indirizzo del poster") }, shape = AR.cardShape, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(banner, { banner = it }, label = { Text("Indirizzo del banner") }, shape = AR.cardShape, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(desc, { desc = it }, label = { Text("Descrizione") }, minLines = 3, maxLines = 8, shape = AR.cardShape, modifier = Modifier.fillMaxWidth())
+            err?.let { Text(it, color = AR.danger, fontSize = 13.sp) }
+            PrimaryButton("Salva", Icons.Default.Check, Modifier.fillMaxWidth()) { if (!busy && title.isNotBlank() && newId != null) save(false) }
+            SecondaryButton("Salva e aggiorna da AniList", Icons.Default.Refresh, Modifier.fillMaxWidth()) { if (!busy && (newId ?: 0) > 0) save(true) }
+            Text("«Aggiorna da AniList» sostituisce titolo, descrizione, immagini, episodi, generi e anno con quelli di AniList.", fontSize = 12.sp, color = AR.textTertiary)
         }
     }
 }
