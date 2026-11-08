@@ -26,6 +26,8 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material3.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +80,7 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
     var confirmDeleteSeries by remember { mutableStateOf(false) }
     var episodeToDelete by remember { mutableStateOf<Episode?>(null) }
     var moving by remember { mutableStateOf<List<Episode>?>(null) }
+    var editing by remember { mutableStateOf<Episode?>(null) }
     var tab by remember(target) { mutableIntStateOf(0) }
     var showStatus by remember { mutableStateOf(false) }
     var similar by remember(target) { mutableStateOf<List<Similar>?>(null) }
@@ -199,7 +202,7 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
                             }
                         }
                     }
-                    items(episodes, key = { it.id }) { ep -> Box(Modifier.offset(y = (-48).dp)) { EpisodeRow(state, ep, series!!, episodes, tickN, alProgress = entry?.progress ?: 0, onDelete = { episodeToDelete = ep }, onMove = { moving = listOf(ep) }) } }
+                    items(episodes, key = { it.id }) { ep -> Box(Modifier.offset(y = (-48).dp)) { EpisodeRow(state, ep, series!!, episodes, tickN, alProgress = entry?.progress ?: 0, onDelete = { episodeToDelete = ep }, onMove = { moving = listOf(ep) }, onEdit = { editing = ep }) } }
                 } else {
                     // Posters wrap into rows of three; the sheet scrolls vertically.
                     val list = similar
@@ -242,6 +245,34 @@ fun DetailSheet(state: AppState, target: DetailTarget, onClose: () -> Unit) {
             moving = null
             if (newSeriesId != series?.id) { state.refresh(); onClose() } else scope.launch { loadEpisodes() }
         }
+    }
+    editing?.let { ep ->
+        var number by remember(ep.id) { mutableStateOf(ep.label.removePrefix("X")) }
+        var extra by remember(ep.id) { mutableStateOf(ep.isExtra) }
+        val parsed = number.replace(",", ".").toDoubleOrNull()
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text("Modifica numero") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(number, { number = it }, label = { Text("Numero") }, singleLine = true, shape = AR.cardShape,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Contenuto extra", fontWeight = FontWeight.SemiBold)
+                            Text("Compare come EX$number e non conta per il progresso su AniList.", fontSize = 12.sp, color = AR.textTertiary)
+                        }
+                        Switch(extra, { extra = it })
+                    }
+                }
+            },
+            confirmButton = { TextButton({
+                val n = parsed ?: return@TextButton
+                editing = null
+                scope.launch { runCatching { api.editEpisode(ep.id, n, extra) }.onSuccess { loadEpisodes() }.onFailure { state.toast(it.message) } }
+            }, enabled = parsed != null) { Text("Salva") } },
+            dismissButton = { TextButton({ editing = null }) { Text("Annulla") } },
+        )
     }
     episodeToDelete?.let { ep ->
         AlertDialog(
@@ -389,7 +420,7 @@ fun startDeviceDownload(state: AppState, ep: Episode, series: Series) = state.sc
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<Episode>, tick: Int, alProgress: Int, onDelete: () -> Unit, onMove: () -> Unit) {
+private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<Episode>, tick: Int, alProgress: Int, onDelete: () -> Unit, onMove: () -> Unit, onEdit: () -> Unit) {
     val context = LocalContext.current
     val view = LocalView.current
     var menu by remember { mutableStateOf(false) }
@@ -397,7 +428,7 @@ private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<E
     val st = remember(item, tick) { item?.let { state.offline.state(it) } }
     val dur = ep.durationSeconds ?: 0.0
     val p = if (dur > 0) ((ep.positionSeconds ?: 0.0) / dur).toFloat() else 0f
-    val seen = ep.completed || ep.number <= alProgress
+    val seen = ep.completed || (!ep.isExtra && ep.number <= alProgress)
     Box {
         Row(Modifier.fillMaxWidth().combinedClickable(onLongClick = { menu = true }) { state.play(ep, series, all) }
             .padding(horizontal = AR.side, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -434,6 +465,7 @@ private fun EpisodeRow(state: AppState, ep: Episode, series: Series, all: List<E
                 if (item != null && st?.done == true) state.offline.openWith(item)
                 else state.scope.launch { runCatching { openUrlWith(context, state.api.stream(ep.id).url) }.onFailure { state.toast(it.message) } }
             })
+            DropdownMenuItem({ Text("Modifica numero…") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { menu = false; onEdit() })
             DropdownMenuItem({ Text("Elimina dal NAS…", color = AR.danger) }, leadingIcon = { Icon(Icons.Default.DeleteForever, null, tint = AR.danger) }, onClick = { menu = false; onDelete() })
             if (item != null) DropdownMenuItem({ Text("Elimina dal dispositivo") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = {
                 menu = false; state.offline.delete(item)

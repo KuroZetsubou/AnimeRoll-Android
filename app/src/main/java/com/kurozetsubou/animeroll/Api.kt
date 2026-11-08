@@ -40,7 +40,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 @Serializable data class Episode(
     val id: Int, val seriesId: Int, val number: Double, val title: String? = null, val sizeBytes: Long = 0,
     val durationSeconds: Double? = null, val source: String, val positionSeconds: Double? = null, val completed: Boolean = false,
-) { val label get() = if (number % 1.0 == 0.0) number.toInt().toString() else number.toString() }
+    val isExtra: Boolean = false,
+) { /** "5", "5.5", or "X1" for extras (so "E" + label reads "EX1"). */
+    val label get() = (if (number % 1.0 == 0.0) number.toInt().toString() else number.toString()).let { if (isExtra) "X$it" else it } }
 @Serializable data class ContinueItem(val series: Series, val episode: Episode)
 @Serializable data class Home(
     val continueWatching: List<ContinueItem>, val recentlyAdded: List<Series>, val aniListWatching: List<Entry>,
@@ -148,6 +150,8 @@ class Api(context: Context) {
     suspend fun librarySearch(q: String): List<Series> = get("api/library/series", mapOf("q" to q))
     /** Deletes an episode (file, subtitles, progress) from the NAS; the series goes with its last episode. */
     suspend fun deleteEpisode(id: Int) { raw("DELETE", "api/library/episodes/$id") }
+    /** Fixes the number of one episode and/or flags it as extra content (EX1, not counted on AniList). */
+    suspend fun editEpisode(id: Int, number: Double, isExtra: Boolean) { raw("PATCH", "api/library/episodes/$id", """{"number":$number,"isExtra":$isExtra}""") }
     /** Deletes a whole series from the NAS to free space. */
     suspend fun deleteSeries(id: Int) { raw("DELETE", "api/library/series/$id") }
     suspend fun storage(): StorageInfo = get("api/settings/storage")

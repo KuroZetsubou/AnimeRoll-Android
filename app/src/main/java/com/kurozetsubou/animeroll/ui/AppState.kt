@@ -107,10 +107,11 @@ class AppState(val api: Api, val offline: OfflineStore, val scope: CoroutineScop
 
     /** Next episode to watch: the one in progress, else the first after the last one seen. */
     fun nextEpisode(eps: List<Episode>): Episode? {
-        val sorted = eps.sortedBy { it.number }
+        val sorted = eps.sortedWith(compareBy({ it.isExtra }, { it.number }))
         sorted.firstOrNull { (it.positionSeconds ?: 0.0) > 5 && !it.completed }?.let { return it }
-        val lastDone = sorted.indexOfLast { it.completed }
-        return sorted.getOrNull(lastDone + 1) ?: sorted.firstOrNull()
+        val regular = sorted.filter { !it.isExtra }
+        val lastDone = regular.indexOfLast { it.completed }
+        return regular.getOrNull(lastDone + 1) ?: sorted.firstOrNull()
     }
 
     fun playSeries(series: Series) = scope.launch {
